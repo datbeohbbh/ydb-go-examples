@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
@@ -54,7 +55,6 @@ func prepareSchema(ctx context.Context, engine *xorm.Engine) error {
 }
 
 func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
-	// seriesData, seasonsData, episodesData := getData()
 	seriesData, seasonsData, episodesData := getData()
 
 	seriesDataMap := []map[string]interface{}{}
@@ -79,7 +79,7 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		})
 	}
 
-	session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.DefaultTxControl())) // default mode
+	session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
 	defer session.Close()
 
 	if err := session.Begin(); err != nil {
@@ -115,8 +115,8 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 	   	if err != nil {
 	   		log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`dir1/dir2/episodes`")
 	   		return err
-	   	}
-	*/
+	   	} */
+
 	if err := session.Commit(); err != nil {
 		return err
 	}
@@ -211,18 +211,19 @@ func explainQuery(ctx context.Context, engine *xorm.Engine, tableName string) er
 	// enable `isAutoClose` to close this session after query.
 	session := engine.Context(ydb.WithQueryMode(ctx, ydb.ExplainQueryMode))
 
-	res, err := session.Table("series").Cols("series_id", "title", "release_date").QueryString()
+	res, err := session.Table("series").Cols("series_id", "title", "release_date").Query()
 	// auto close session after this
 	if err != nil {
 		return fmt.Errorf("explain query failed: %w", err)
 	}
 
-	// AST, PLAN
-	for i := 0; i < len(res); i++ {
-		for k, v := range res[i] {
-			log.Println(k, v)
-		}
+	if len(res) == 0 {
+		return errors.New("error: in explainQuery expected len(res) > 0")
 	}
+
+	log.Println("AST", string(res[0]["AST"]))
+	log.Println("Plan", string(res[0]["Plan"]))
+
 	return nil
 }
 
@@ -321,6 +322,8 @@ func selectScan(ctx context.Context, engine *xorm.Engine) error {
 			LessVal: sql.Named("from", date("2006-01-01")),
 			MoreVal: sql.Named("to", date("2006-12-31")),
 		}).
+		Asc("air_date", "title").
+		Limit(3, 3). // Limit(limitN, offsetN)
 		Rows(&Episodes{})
 
 	defer func() {
@@ -342,6 +345,77 @@ func selectScan(ctx context.Context, engine *xorm.Engine) error {
 			string(ep.EpisodeID), ep.Title, ep.AirDate.Format("2006-01-02"),
 		)
 	}
+
+	return nil
+}
+
+func joinTable(ctx context.Context, engine *xorm.Engine) error {
+	session := engine.Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
+
+	logResult := func(msg string, res []map[string][]byte) {
+		log.Println(msg)
+		log.Printf("got %v records", len(res))
+		cols := []string{}
+		for col, _ := range res[0] {
+			cols = append(cols, col)
+		}
+		sort.Strings(cols)
+		for _, m := range res {
+			var str string = ""
+			for _, col := range cols {
+				str += string(m[col]) + "  "
+			}
+			log.Println(str)
+		}
+	}
+
+	for _, joinOp := range []string{"INNER", "LEFT", "RIGHT", "FULL"} {
+		res, err := session.
+			Table((&Seasons{}).TableName()).
+			Alias("sa").
+			Join(joinOp, []string{(&Series{}).TableName(), "sr"}, "sa.series_id = sr.series_id").
+			Cols("sa.title", "sr.title", "sr.series_id", "sa.season_id").
+			Asc("sr.series_id", "sa.season_id").
+			Query()
+
+		if err != nil {
+			return err
+		}
+
+		logResult(fmt.Sprintf("do %s JOIN", joinOp), res)
+	}
+
+	res, err := session.
+		Table((&Seasons{}).TableName()).
+		Alias("sa").
+		Join("LEFT SEMI", []string{(&Series{}).TableName(), "sr"}, "sa.series_id = sr.series_id").
+		Cols("sa.title", "sa.season_id").
+		Asc("sa.season_id").
+		Query()
+
+	if err != nil {
+		return err
+	}
+
+	logResult(fmt.Sprintf("do %s JOIN", "LEFT SEMI"), res)
+
+	return nil
+}
+
+func updateTable(ctx context.Context, engine *xorm.Engine) error {
+	session := engine.NewSession().Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
+	defer session.Close()
+
+	_, err := session.Table("episodes").Update(map[string]interface{}{
+		"title": "test",
+		"views": uint64(999),
+	}, builder.Gte{"air_date": date("2010-12-31")}.And(builder.Eq{"title": "The Cap Table"}))
+
+	if err != nil {
+		return err
+	}
+
+	log.Println("ok: table is updated")
 
 	return nil
 }

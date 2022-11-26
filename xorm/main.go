@@ -43,4 +43,14 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("failed on select scan: %v", err))
 	}
+
+	err = joinTable(ctx, engine)
+	if err != nil {
+		panic(fmt.Errorf("failed on join table: %v", err))
+	}
+
+	err = updateTable(ctx, engine)
+	if err != nil {
+		panic(fmt.Errorf("failed on update table: %v", err))
+	}
 }
