@@ -82,4 +82,8 @@ func main() {
 		panic(fmt.Errorf("failed on update table: %v", err))
 	}
 
+	err = deleteRecords(ctx, engine)
+	if err != nil {
+		panic(fmt.Errorf("failed on delete records: %v", err))
+	}
 }

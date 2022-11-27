@@ -113,16 +113,24 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 
 	// replace using fetch
 	// TODO: this way have not work yet
-	/* 	_, err = session.Table((&Episodes{}).TableName()).Replace(builder.Select().From("`test/episodes`"))
+	/*
+			_, err = session.
+		   		Table((&Episodes{}).TableName()).
+		   		Replace(
+		   			builder.
+		   			Select().
+		   			From("`test/episodes`"),
+		   		)
 
-	   	if err != nil {
-	   		log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`test/episodes`")
-	   		return err
-	   	} */
-
+		   	if err != nil {
+		   		log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`test/episodes`")
+		   		return err
+		   	}
+	*/
 	log.Println("ok: fill episodes table")
 
 	if err := session.Commit(); err != nil {
+		log.Println("error: rollback, no changed happen!")
 		return err
 	}
 	// below code worked!
@@ -158,58 +166,6 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 			)
 		}
 	*/
-	return nil
-}
-
-func TestSelect(ctx context.Context, engine *xorm.Engine) error {
-	var series_id interface{}
-	session := engine.Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
-	defer session.Close()
-
-	has, err := session.Table(&Series{}).Cols("series_id").Get(&series_id)
-	if err != nil {
-		return err
-	}
-
-	b, _ := series_id.([]byte)
-	log.Println(has, string(b))
-
-	_, err = session.Table(&Series{}).Where("series_id = ?", b).Exist()
-	if err != nil {
-		return err
-	}
-
-	var seasons []Seasons
-	err = session.Table(&Seasons{}).Find(&seasons)
-
-	if err != nil {
-		return err
-	}
-
-	log.Println("Find test")
-	for _, v := range seasons {
-		log.Println(v.FirstAired, v.LastAired, string(v.SeriesID), string(v.SeasonID), v.Title)
-	}
-
-	rows, err := session.Rows(&Seasons{Title: "Season 1"})
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	if err != nil {
-		return err
-	}
-
-	log.Println("Rows test")
-	for rows.Next() {
-		var v Seasons
-		err = rows.Scan(&v)
-		if err != nil {
-			return err
-		}
-		log.Println(v.FirstAired, v.LastAired, string(v.SeriesID), string(v.SeasonID), v.Title)
-	}
-
 	return nil
 }
 
@@ -415,13 +371,36 @@ func updateTable(ctx context.Context, engine *xorm.Engine) error {
 	_, err := session.Table("episodes").Update(map[string]interface{}{
 		"title": "test",
 		"views": uint64(999),
-	}, builder.Gte{"air_date": date("2010-12-31")}.And(builder.Eq{"title": "The Cap Table"}))
+	}, builder.Gte{"air_date": date("2010-12-31")}.And(builder.Like{"title", "%The%"}))
 
 	if err != nil {
 		return err
 	}
 
 	log.Println("ok: table is updated")
+
+	return nil
+}
+
+func deleteRecords(ctx context.Context, engine *xorm.Engine) error {
+	session := engine.NewSession().Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
+	defer session.Close()
+
+	_, err := session.
+		Table(&Seasons{}).
+		Where(builder.Between{
+			Col:     "first_aired",
+			LessVal: sql.Named("from", date("2007-06-01")),
+			MoreVal: sql.Named("to", date("2008-06-01")),
+		}).
+		In("title", []string{"Season 1", "Season 2", "Season 3", "Season 4", "Season 5"}).
+		Delete() // can pass the struct and condition will match for struct's field
+
+	if err != nil {
+		return err
+	}
+
+	log.Println("ok: deleted all records with first_aired from 2007-06-01 to 2008-06-01 in all seasons")
 
 	return nil
 }
