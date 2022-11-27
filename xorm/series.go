@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"time"
 
 	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"github.com/ydb-platform/ydb-go-sdk/v3/table"
@@ -93,7 +94,6 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		log.Printf("error: insert data into %s table failed", (&Series{}).TableName())
 		return err
 	}
-	log.Println("ok: fill series table")
 
 	// fill seasons table
 	_, err = session.Insert(seasonsData)
@@ -101,7 +101,6 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		log.Printf("error: insert data into %s table failed", (&Seasons{}).TableName())
 		return err
 	}
-	log.Println("ok: fill seasons table")
 
 	// fill episodes table
 
@@ -114,62 +113,31 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 	// replace using fetch
 	// TODO: this way have not work yet
 	/*
-			_, err = session.
-		   		Table((&Episodes{}).TableName()).
-		   		Replace(
-		   			builder.
-		   			Select().
-		   			From("`test/episodes`"),
-		   		)
+		_, err = session.
+			Table((&Episodes{}).TableName()).
+			Replace(
+				builder.
+					Select().
+					From("`test/episodes`"),
+			)
 
-		   	if err != nil {
-		   		log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`test/episodes`")
-		   		return err
-		   	}
+		if err != nil {
+			log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`test/episodes`")
+			return err
+		}
 	*/
-	log.Println("ok: fill episodes table")
-
 	if err := session.Commit(); err != nil {
 		log.Println("error: rollback, no changed happen!")
 		return err
 	}
-	// below code worked!
-	/*
-		log.Println("test after commit")
 
-		rows, err := session.
-			Cols("episode_id", "title", "air_date").
-			And(builder.Between{
-				Col:     "air_date",
-				LessVal: sql.Named("from", date("2006-01-01")),
-				MoreVal: sql.Named("to", date("2006-12-31")),
-			}).
-			Rows(&Episodes{})
+	log.Println("ok: fill tables with data")
 
-		defer func() {
-			_ = rows.Close()
-		}()
-
-		if err != nil {
-			return err
-		}
-
-		log.Println("> scan select of episodes of `Season 1` of `IT Crowd` between 2006-01-01 and 2006-12-31:")
-		for rows.Next() {
-			var ep Episodes
-			if err = rows.Scan(&ep); err != nil {
-				return err
-			}
-			log.Printf(
-				"> [%s] %s (%s)",
-				string(ep.EpisodeID), ep.Title, ep.AirDate.Format("2006-01-02"),
-			)
-		}
-	*/
 	return nil
 }
 
 func explainQuery(ctx context.Context, engine *xorm.Engine, tableName string) error {
+	log.Println("Explain Query")
 	// enable `isAutoClose` to close this session after query.
 	session := engine.Context(ydb.WithQueryMode(ctx, ydb.ExplainQueryMode))
 
@@ -195,6 +163,7 @@ func selectDefault(ctx context.Context, engine *xorm.Engine) error {
 		return err
 	}
 
+	log.Println("Select Default")
 	session := engine.NewSession().Context(ydb.WithQueryMode(ctx, ydb.ScanQueryMode))
 	defer session.Close()
 
@@ -224,6 +193,7 @@ func selectDefault(ctx context.Context, engine *xorm.Engine) error {
 }
 
 func selectScan(ctx context.Context, engine *xorm.Engine) error {
+	log.Println("Select Scan")
 	// Note: `builder` does not apply quote policy of YQL
 	var (
 		id         []byte
@@ -285,7 +255,7 @@ func selectScan(ctx context.Context, engine *xorm.Engine) error {
 			MoreVal: sql.Named("to", date("2006-12-31")),
 		}).
 		Asc("air_date", "title").
-		Limit(3, 3). // Limit(limitN, offsetN)
+		// Limit(3, 3). // Limit(limitN, offsetN)
 		Rows(&Episodes{})
 
 	defer func() {
@@ -327,7 +297,7 @@ func joinTable(ctx context.Context, engine *xorm.Engine) error {
 			for _, col := range cols {
 				str += string(m[col]) + "  "
 			}
-			log.Println(str)
+			log.Println(">", str)
 		}
 	}
 
@@ -344,7 +314,7 @@ func joinTable(ctx context.Context, engine *xorm.Engine) error {
 			return err
 		}
 
-		logResult(fmt.Sprintf("do %s JOIN", joinOp), res)
+		logResult(fmt.Sprintf("%s JOIN", joinOp), res)
 	}
 
 	res, err := session.
@@ -359,34 +329,94 @@ func joinTable(ctx context.Context, engine *xorm.Engine) error {
 		return err
 	}
 
-	logResult(fmt.Sprintf("do %s JOIN", "LEFT SEMI"), res)
+	logResult(fmt.Sprintf("%s JOIN", "LEFT SEMI"), res)
 
 	return nil
 }
 
 func updateTable(ctx context.Context, engine *xorm.Engine) error {
-	session := engine.NewSession().Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
+	log.Println("Update table")
+	session := engine.
+		NewSession().
+		Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
+
 	defer session.Close()
 
-	_, err := session.Table("episodes").Update(map[string]interface{}{
-		"title": "test",
-		"views": uint64(999),
-	}, builder.Gte{"air_date": date("2010-12-31")}.And(builder.Like{"title", "%The%"}))
+	if err := session.Begin(); err != nil {
+		return err
+	}
+	defer session.Rollback()
+
+	_, err := session.
+		Table("episodes").
+		Update(map[string]interface{}{
+			"title": "test",
+			"views": uint64(999),
+		}, builder.Gte{"air_date": date("2010-12-31")}.And(builder.Like{"title", "%The%"}))
 
 	if err != nil {
 		return err
 	}
 
-	log.Println("ok: table is updated")
+	if err := session.Commit(); err != nil {
+		return err
+	}
+
+	// read after commit, if not will cause an error
+	rows, err := session.
+		Table("episodes").
+		Cols("title", "air_date", "views").
+		Where("views = ?", sql.Named("views", uint64(999))).
+		And("title = ?", sql.Named("title", "test")).
+		Rows(&Episodes{})
+
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	log.Println("ok: after episodes table is updated")
+	for rows.Next() {
+		var (
+			title    string
+			air_date time.Time
+			views    uint64
+		)
+		// Scan order must be same as Cols order
+		// this case: Cols("title", "air_date", "views")
+		if err := rows.Scan(&title, &air_date, &views); err != nil {
+			return err
+		}
+		log.Println(">", title, views, air_date.Format("2006-01-02"))
+	}
 
 	return nil
 }
 
 func deleteRecords(ctx context.Context, engine *xorm.Engine) error {
-	session := engine.NewSession().Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
+	log.Println("Delete Records")
+	// use serializable rw isolation mode.
+	session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
 	defer session.Close()
 
-	_, err := session.
+	if err := session.Begin(); err != nil {
+		return err
+	}
+	defer session.Rollback()
+
+	cnt, err := session.
+		Table(&Seasons{}).
+		Cols("first_aired").
+		Count()
+	if err != nil {
+		return err
+	}
+	log.Println(">", "before delete:", cnt)
+
+	_, err = session.
 		Table(&Seasons{}).
 		Where(builder.Between{
 			Col:     "first_aired",
@@ -400,7 +430,17 @@ func deleteRecords(ctx context.Context, engine *xorm.Engine) error {
 		return err
 	}
 
+	if err := session.Commit(); err != nil {
+		return err
+	}
+
 	log.Println("ok: deleted all records with first_aired from 2007-06-01 to 2008-06-01 in all seasons")
+
+	cnt, err = session.Table(&Seasons{}).Cols("first_aired").Count()
+	if err != nil {
+		return err
+	}
+	log.Println(">", "after delete:", cnt)
 
 	return nil
 }
