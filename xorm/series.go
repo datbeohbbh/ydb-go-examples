@@ -86,12 +86,14 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		return err
 	}
 	defer session.Rollback()
+
 	// fill series table
 	_, err := session.Table((&Series{}).TableName()).Insert(seriesDataMap)
 	if err != nil {
 		log.Printf("error: insert data into %s table failed", (&Series{}).TableName())
 		return err
 	}
+	log.Println("ok: fill series table")
 
 	// fill seasons table
 	_, err = session.Insert(seasonsData)
@@ -99,6 +101,7 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		log.Printf("error: insert data into %s table failed", (&Seasons{}).TableName())
 		return err
 	}
+	log.Println("ok: fill seasons table")
 
 	// fill episodes table
 
@@ -110,16 +113,19 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 
 	// replace using fetch
 	// TODO: this way have not work yet
-	/* 	_, err = session.Table((&Episodes{}).TableName()).Replace(builder.Select().From("`dir1/dir2/episodes`"))
+	/* 	_, err = session.Table((&Episodes{}).TableName()).Replace(builder.Select().From("`test/episodes`"))
 
 	   	if err != nil {
-	   		log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`dir1/dir2/episodes`")
+	   		log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`test/episodes`")
 	   		return err
 	   	} */
+
+	log.Println("ok: fill episodes table")
 
 	if err := session.Commit(); err != nil {
 		return err
 	}
+	// below code worked!
 	/*
 		log.Println("test after commit")
 

@@ -2,15 +2,46 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
+	"os"
 
-	_ "github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3"
 	"xorm.io/xorm"
+	"xorm.io/xorm/core"
 )
 
+func connect(ctx context.Context) (*xorm.Engine, error) {
+	nativeDriver, err := ydb.Open(ctx,
+		os.Getenv("YDB_DSN"),
+		ydb.WithCertificatesFromFile(os.Getenv("YDB_CERT")),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	connector, err := ydb.Connector(nativeDriver)
+	if err != nil {
+		return nil, err
+	}
+
+	db := sql.OpenDB(connector)
+
+	xdb := core.FromDB(db)
+	engine, err := xorm.NewEngineWithDB("ydb", os.Getenv("YDB_DSN"), xdb)
+	if err != nil {
+		return nil, err
+	}
+	return engine, nil
+}
+
 func main() {
-	engine, err := xorm.NewEngine("ydb", "grpc://localhost:2136/local")
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	engine, err := connect(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -20,9 +51,6 @@ func main() {
 	defer func() {
 		_ = engine.Close()
 	}()
-
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
 
 	err = prepareSchema(ctx, engine)
 	if err != nil {
@@ -53,4 +81,5 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("failed on update table: %v", err))
 	}
+
 }
