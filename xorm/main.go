@@ -45,6 +45,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// uncomment to see the generated YQL
+	// engine.ShowSQL(true)
 
 	log.Println("ok: connected to database")
 
@@ -85,5 +87,10 @@ func main() {
 	err = deleteRecords(ctx, engine)
 	if err != nil {
 		panic(fmt.Errorf("failed on delete records: %v", err))
+	}
+
+	err = replaceByFetchData(ctx, engine, "`test/episodes`")
+	if err != nil {
+		panic(fmt.Errorf("failed on replace by fetch data: %v", err))
 	}
 }

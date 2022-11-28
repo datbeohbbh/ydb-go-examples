@@ -15,9 +15,6 @@ import (
 	"xorm.io/xorm"
 )
 
-// 25.11.2022:
-// TODO: solve problem with transactions
-
 // note: engine.Context() set `isAutoClose` = true in new session.
 // to disable `isAutoClose` in new session use: engine.NewSession().Context(ctx) instead (session for transactions must be use this).
 
@@ -80,7 +77,9 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		})
 	}
 
-	session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
+	txCtx := ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl())
+	// session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
+	session := engine.NewSession().Context(txCtx)
 	defer session.Close()
 
 	if err := session.Begin(); err != nil {
@@ -110,22 +109,6 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		return err
 	}
 
-	// replace using fetch
-	// TODO: this way have not work yet
-	/*
-		_, err = session.
-			Table((&Episodes{}).TableName()).
-			Replace(
-				builder.
-					Select().
-					From("`test/episodes`"),
-			)
-
-		if err != nil {
-			log.Printf("error: replace data into %s table by fetch data from %s table failed", (&Episodes{}).TableName(), "`test/episodes`")
-			return err
-		}
-	*/
 	if err := session.Commit(); err != nil {
 		log.Println("error: rollback, no changed happen!")
 		return err
@@ -441,6 +424,60 @@ func deleteRecords(ctx context.Context, engine *xorm.Engine) error {
 		return err
 	}
 	log.Println(">", "after delete:", cnt)
+
+	return nil
+}
+
+func replaceByFetchData(ctx context.Context, engine *xorm.Engine, fromTable string) error {
+	// `test/episodes` is old table so set of pk is different from latest `episodes` table
+	// replace from `test/episodes` into `episodes` with double the number of rows
+	// so expected result is `number of row in episodes after replace`  = 2 * `number of rows in episodes before replace`
+	log.Println("Replace by fetch data")
+
+	txCtx := ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl())
+	session := engine.NewSession().Context(txCtx)
+	defer session.Close()
+
+	if err := session.Begin(); err != nil {
+		return err
+	}
+	defer session.Rollback()
+
+	rowsBefore, err := session.
+		Table("episodes").
+		Count()
+
+	if err != nil {
+		return err
+	}
+	log.Println(">", "number of rows before replace:", rowsBefore)
+
+	// replace by fetch data
+	_, err = session.
+		Table("episodes").
+		Replace(builder.Select().From(fromTable))
+
+	if err != nil {
+		return err
+	}
+
+	if err := session.Commit(); err != nil {
+		return err
+	}
+
+	rowsAfter, err := session.
+		Table("episodes").
+		Count()
+
+	if err != nil {
+		return err
+	}
+
+	log.Println(">", "number of rows after replace:", rowsAfter)
+
+	if rowsAfter != 2*rowsBefore {
+		return fmt.Errorf("expected number of [rows after] = [2 * rows before]: [%v] != [2 * %v]", rowsAfter, rowsBefore)
+	}
 
 	return nil
 }
