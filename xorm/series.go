@@ -39,9 +39,10 @@ func createTable(ctx context.Context, engine *xorm.Engine, tableName string, bea
 
 func prepareSchema(ctx context.Context, engine *xorm.Engine) error {
 	for tableName, ii := range map[string]interface{}{
-		(&Series{}).TableName():   &Series{},
-		(&Seasons{}).TableName():  &Seasons{},
-		(&Episodes{}).TableName(): &Episodes{},
+		(&Series{}).TableName():       &Series{},
+		(&Seasons{}).TableName():      &Seasons{},
+		(&Episodes{}).TableName():     &Episodes{},
+		(&TestEpisodes{}).TableName(): &TestEpisodes{},
 	} {
 		err := createTable(ctx, engine, tableName, ii)
 		if err != nil {
@@ -77,9 +78,7 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 		})
 	}
 
-	txCtx := ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl())
-	// session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
-	session := engine.NewSession().Context(txCtx)
+	session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
 	defer session.Close()
 
 	if err := session.Begin(); err != nil {
@@ -104,7 +103,7 @@ func fillTableWithData(ctx context.Context, engine *xorm.Engine) error {
 	// fill episodes table
 
 	// replace using []map[string]interface{}
-	_, err = session.Table((&Episodes{}).TableName()).Replace(episodesDataMap)
+	_, err = session.Table((&TestEpisodes{}).TableName()).Replace(episodesDataMap)
 	if err != nil {
 		return err
 	}
@@ -382,44 +381,45 @@ func updateTable(ctx context.Context, engine *xorm.Engine) error {
 func deleteRecords(ctx context.Context, engine *xorm.Engine) error {
 	log.Println("Delete Records")
 	// use serializable rw isolation mode.
-	session := engine.NewSession().Context(ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()))
-	defer session.Close()
+	_, err := engine.TransactionContext(
+		ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl()),
+		func(session *xorm.Session) (interface{}, error) {
+			cnt, err := session.
+				Table(&Seasons{}).
+				Cols("first_aired").
+				Count()
+			if err != nil {
+				return nil, err
+			}
+			log.Println(">", "before delete:", cnt)
 
-	if err := session.Begin(); err != nil {
-		return err
-	}
-	defer session.Rollback()
+			_, err = session.
+				Table(&Seasons{}).
+				Where(builder.Between{
+					Col:     "first_aired",
+					LessVal: sql.Named("from", date("2007-06-01")),
+					MoreVal: sql.Named("to", date("2008-06-01")),
+				}).
+				In("title", []string{"Season 1", "Season 2", "Season 3", "Season 4", "Season 5"}).
+				Delete() // can pass the struct and condition will match for struct's field
 
-	cnt, err := session.
-		Table(&Seasons{}).
-		Cols("first_aired").
-		Count()
+			if err != nil {
+				return nil, err
+			}
+
+			log.Println("ok: deleted all records with first_aired from 2007-06-01 to 2008-06-01 in all seasons")
+
+			// no need for commit or rollback, just return nil error as good final
+			return nil, nil
+		},
+	)
+
 	if err != nil {
 		return err
 	}
-	log.Println(">", "before delete:", cnt)
 
-	_, err = session.
-		Table(&Seasons{}).
-		Where(builder.Between{
-			Col:     "first_aired",
-			LessVal: sql.Named("from", date("2007-06-01")),
-			MoreVal: sql.Named("to", date("2008-06-01")),
-		}).
-		In("title", []string{"Season 1", "Season 2", "Season 3", "Season 4", "Season 5"}).
-		Delete() // can pass the struct and condition will match for struct's field
-
-	if err != nil {
-		return err
-	}
-
-	if err := session.Commit(); err != nil {
-		return err
-	}
-
-	log.Println("ok: deleted all records with first_aired from 2007-06-01 to 2008-06-01 in all seasons")
-
-	cnt, err = session.Table(&Seasons{}).Cols("first_aired").Count()
+	session := engine.Context(ydb.WithQueryMode(ctx, ydb.DataQueryMode))
+	cnt, err := session.Table(&Seasons{}).Cols("first_aired").Count()
 	if err != nil {
 		return err
 	}
@@ -429,9 +429,8 @@ func deleteRecords(ctx context.Context, engine *xorm.Engine) error {
 }
 
 func replaceByFetchData(ctx context.Context, engine *xorm.Engine, fromTable string) error {
-	// `test/episodes` is old table so set of pk is different from latest `episodes` table
-	// replace from `test/episodes` into `episodes` with double the number of rows
-	// so expected result is `number of row in episodes after replace`  = 2 * `number of rows in episodes before replace`
+	// Fetch data from `test/episodes` to `episodes`.
+	// After fetch, the number of rows in `episodes` equals the number of rows in `test/episodes`
 	log.Println("Replace by fetch data")
 
 	txCtx := ydb.WithTxControl(ctx, table.SerializableReadWriteTxControl())
@@ -444,13 +443,13 @@ func replaceByFetchData(ctx context.Context, engine *xorm.Engine, fromTable stri
 	defer session.Rollback()
 
 	rowsBefore, err := session.
-		Table("episodes").
+		Table(fromTable).
 		Count()
 
 	if err != nil {
 		return err
 	}
-	log.Println(">", "number of rows before replace:", rowsBefore)
+	log.Printf("> number of rows of %s: %v\n", fromTable, rowsBefore)
 
 	// replace by fetch data
 	_, err = session.
@@ -475,8 +474,8 @@ func replaceByFetchData(ctx context.Context, engine *xorm.Engine, fromTable stri
 
 	log.Println(">", "number of rows after replace:", rowsAfter)
 
-	if rowsAfter != 2*rowsBefore {
-		return fmt.Errorf("expected number of [rows after] = [2 * rows before]: [%v] != [2 * %v]", rowsAfter, rowsBefore)
+	if rowsAfter != rowsBefore {
+		return fmt.Errorf("expected number of [number of rows in %s] = [number of rows in %s]", "episodes", fromTable)
 	}
 
 	return nil

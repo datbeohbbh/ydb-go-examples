@@ -64,6 +64,11 @@ func main() {
 		panic(fmt.Errorf("failed on fill data into tables: %v", err))
 	}
 
+	err = replaceByFetchData(ctx, engine, "`test/episodes`")
+	if err != nil {
+		panic(fmt.Errorf("failed on replace by fetch data: %v", err))
+	}
+
 	err = selectDefault(ctx, engine)
 	if err != nil {
 		panic(fmt.Errorf("failed on select default: %v", err))
@@ -89,8 +94,4 @@ func main() {
 		panic(fmt.Errorf("failed on delete records: %v", err))
 	}
 
-	err = replaceByFetchData(ctx, engine, "`test/episodes`")
-	if err != nil {
-		panic(fmt.Errorf("failed on replace by fetch data: %v", err))
-	}
 }

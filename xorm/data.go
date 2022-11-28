@@ -32,6 +32,10 @@ type Episodes struct {
 	Views     uint64    `xorm:"'views'"`
 }
 
+type TestEpisodes struct {
+	Episodes `xorm:"extends"`
+}
+
 // table name method
 func (*Series) TableName() string {
 	return "series"
@@ -43,6 +47,10 @@ func (*Seasons) TableName() string {
 
 func (*Episodes) TableName() string {
 	return "episodes"
+}
+
+func (*TestEpisodes) TableName() string {
+	return "test/episodes"
 }
 
 func seriesData(id string, released time.Time, title, info, comment string) *Series {
