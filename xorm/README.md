@@ -1,3 +1,5 @@
+Result:
+```text
 2022/11/28 11:00:53 ok: connected to database
 2022/11/28 11:00:53 ok: series table is created
 2022/11/28 11:00:53 ok: seasons table is created
@@ -127,3 +129,4 @@
 2022/11/28 11:00:53 Replace by fetch data
 2022/11/28 11:00:53 > number of rows before replace: 70
 2022/11/28 11:00:54 > number of rows after replace: 140
+```
