@@ -9,6 +9,9 @@ basic:
 database_sql:
 	go run ./basic/database_sql -ydb=${YDB_CONNECTION_STRING} -prefix=database/sql
 
+xorm:
+	go run ./basic/xorm -ydb=${YDB_CONNECTION_STRING} -prefix=xorm -showSQL=false
+
 bulk_upsert:
 	go run ./bulk_upsert -ydb=${YDB_CONNECTION_STRING} -prefix=bulk_upsert -table=bulk_upsert
 
