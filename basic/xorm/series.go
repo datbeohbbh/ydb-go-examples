@@ -127,45 +127,7 @@ func fillTableWithData(ctx context.Context) error {
 	return nil
 }
 
-// FIXME
-func explainQuery(ctx context.Context, tableName string) error {
-	engine, err := enginePool.GetExplainQueryEngine()
-	if err != nil {
-		return err
-	}
-	log.Println("Explain Query")
-	// enable `isAutoClose` to close this session after query.
-	session := engine.Context(ctx)
-
-	rows, err := session.Table(&Series{}).Cols("series_id", "title", "release_date").Rows(&Series{})
-	// rows, err := session.Table("series").Cols("series_id", "title", "release_date").Query()
-	defer func() {
-		_ = rows.Close()
-	}()
-	// auto close session after this
-	if err != nil {
-		return fmt.Errorf("explain query failed: %w", err)
-	}
-
-	if rows.Next() {
-		var ast, plan string
-		err = rows.Scan(&ast, &plan)
-		if err != nil {
-			return fmt.Errorf("explain query failed: %v", err)
-		}
-		log.Println(ast, plan)
-	}
-	// log.Println(rows)
-
-	return nil
-}
-
 func selectDefault(ctx context.Context) error {
-	/* 	err := explainQuery(ctx, "series")
-	   	if err != nil {
-	   		return err
-	   	} */
-
 	engine, err := enginePool.GetScanQueryEngine()
 	if err != nil {
 		return err
